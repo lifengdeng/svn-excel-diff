@@ -1294,7 +1294,7 @@ function renderSheetDiff(sdata, sheetName) {
   html += `<div class="diff-label left">BASE (SVN)</div>`;
   html += `<div class="diff-label">WORKING COPY</div>`;
   html += `</div>`;
-  // Shared vertical scroll container with two horizontal-scroll halves
+  // Shared vertical scroll container with two independently horizontal-scrollable halves
   html += `<div class="diff-scroll" id="diffScroll${sid}">`;
   html += `<div class="diff-half left" id="diffL${sid}"><table class="diff-table">`;
   html += `<thead><tr><th>#</th><th></th>${thBase}</tr></thead>`;
@@ -1304,7 +1304,7 @@ function renderSheetDiff(sdata, sheetName) {
   html += `<tbody>${rightRows}</tbody></table></div>`;
   html += `</div>`;
 
-  // Sync horizontal scroll only (vertical is shared via .diff-scroll)
+  // Sync both axes; WebKit can make each half its own vertical scroll container.
   requestAnimationFrame(() => {
     setupHScrollSync(`diffL${sid}`, `diffR${sid}`);
     syncDiffRowHeights(sid);
@@ -1396,20 +1396,20 @@ function setupHScrollSync(leftId, rightId) {
   const left = document.getElementById(leftId);
   const right = document.getElementById(rightId);
   if (!left || !right) return;
-  // Only sync horizontal scroll — vertical is shared by parent .diff-scroll
+  if (left.dataset.scrollSyncTarget === rightId && right.dataset.scrollSyncTarget === leftId) return;
+  left.dataset.scrollSyncTarget = rightId;
+  right.dataset.scrollSyncTarget = leftId;
+
   let syncing = false;
-  left.addEventListener('scroll', () => {
+  const syncFrom = (source, target) => {
     if (syncing) return;
     syncing = true;
-    right.scrollLeft = left.scrollLeft;
+    target.scrollLeft = source.scrollLeft;
+    target.scrollTop = source.scrollTop;
     requestAnimationFrame(() => { syncing = false; });
-  });
-  right.addEventListener('scroll', () => {
-    if (syncing) return;
-    syncing = true;
-    left.scrollLeft = right.scrollLeft;
-    requestAnimationFrame(() => { syncing = false; });
-  });
+  };
+  left.addEventListener('scroll', () => syncFrom(left, right));
+  right.addEventListener('scroll', () => syncFrom(right, left));
 }
 
 function escVal(v) { if(v===''||v===null||v===undefined) return '<span style="opacity:0.3">-</span>'; return esc(v); }
