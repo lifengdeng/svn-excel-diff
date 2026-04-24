@@ -113,10 +113,6 @@ svn_diff/
     └── build_win.bat      # Windows 构建脚本
 ```
 
-## Known Issues
-
-- 左右分栏对照视图中，新增/删除行的对侧占位行在 WebKit 引擎（macOS pywebview / Safari）下可能存在行高不对齐的问题。Chromium 内核浏览器（Chrome / Edge）下表现正常。
-
 ## License
 
 MIT

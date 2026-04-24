@@ -18,6 +18,7 @@ import difflib
 import html as html_mod
 import json
 import os
+import shutil
 import string
 import subprocess
 import sys
@@ -28,6 +29,25 @@ from datetime import datetime
 
 import openpyxl
 import xlrd
+
+
+SVN_CANDIDATES = (
+    "/opt/homebrew/bin/svn",
+    "/usr/local/bin/svn",
+    "/usr/bin/svn",
+    "/opt/local/bin/svn",
+)
+
+
+def get_svn_command():
+    """Return an svn executable path that works from shells and macOS .app launches."""
+    svn = shutil.which("svn")
+    if svn:
+        return svn
+    for candidate in SVN_CANDIDATES:
+        if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+            return candidate
+    return "svn"
 
 
 # ---------------------------------------------------------------------------
@@ -122,7 +142,7 @@ def read_excel_to_rows(filepath):
 def get_svn_base(filepath):
     try:
         result = subprocess.run(
-            ["svn", "cat", filepath], capture_output=True, check=True,
+            [get_svn_command(), "cat", filepath], capture_output=True, check=True,
         )
         ext = os.path.splitext(filepath)[1]
         with tempfile.NamedTemporaryFile(suffix=ext, delete=False) as f:
@@ -134,7 +154,7 @@ def get_svn_base(filepath):
 
 def get_svn_status(directory):
     result = subprocess.run(
-        ["svn", "status", directory], capture_output=True, text=True,
+        [get_svn_command(), "status", directory], capture_output=True, text=True,
     )
     files = []
     for line in result.stdout.strip().split("\n"):
@@ -149,7 +169,7 @@ def get_svn_status(directory):
 def get_svn_info(filepath):
     """Get SVN revision info for display."""
     result = subprocess.run(
-        ["svn", "info", filepath], capture_output=True, text=True,
+        [get_svn_command(), "info", filepath], capture_output=True, text=True,
     )
     info = {}
     for line in result.stdout.strip().split("\n"):
@@ -1074,7 +1094,7 @@ def main():
             finally:
                 os.unlink(base_tmp)
         else:
-            r = subprocess.run(["svn", "diff", filepath], capture_output=True, text=True)
+            r = subprocess.run([get_svn_command(), "diff", filepath], capture_output=True, text=True)
             if r.stdout.strip():
                 results.append((filepath, status, None, r.stdout))
 

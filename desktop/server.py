@@ -23,7 +23,7 @@ from flask import Flask, jsonify, request
 
 # Import diff engine from the same directory
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from svn_excel_diff import read_excel_to_rows, build_unified_diff, get_svn_base
+from svn_excel_diff import read_excel_to_rows, build_unified_diff, get_svn_base, get_svn_command
 
 app = Flask(__name__)
 
@@ -69,7 +69,7 @@ def api_browse():
     if not is_svn:
         try:
             r = subprocess.run(
-                ["svn", "info", req_path],
+                [get_svn_command(), "info", req_path],
                 capture_output=True, text=True, timeout=5,
             )
             is_svn = r.returncode == 0
@@ -118,11 +118,11 @@ def api_svn_status():
 
     try:
         result = subprocess.run(
-            ["svn", "status", dir_path],
+            [get_svn_command(), "status", dir_path],
             capture_output=True, text=True, timeout=30,
         )
     except FileNotFoundError:
-        return jsonify({"error": "svn command not found. Please install SVN."}), 500
+        return jsonify({"error": "svn command not found. Please install SVN or add it to PATH."}), 500
     except subprocess.TimeoutExpired:
         return jsonify({"error": "svn status timed out"}), 500
 
@@ -199,7 +199,7 @@ def api_svn_diff():
     else:
         # Text file — use svn diff
         result = subprocess.run(
-            ["svn", "diff", filepath],
+            [get_svn_command(), "diff", filepath],
             capture_output=True, text=True,
         )
         return jsonify({
@@ -223,7 +223,7 @@ def api_svn_log():
     username = request.args.get("username", "").strip()
     password = request.args.get("password", "").strip()
 
-    cmd = ["svn", "log", "-l", str(limit), "--xml", "--non-interactive"]
+    cmd = [get_svn_command(), "log", "-l", str(limit), "--xml", "--non-interactive"]
     if username and password:
         cmd += ["--username", username, "--password", password]
     cmd.append(dir_path)
@@ -231,7 +231,7 @@ def api_svn_log():
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
     except FileNotFoundError:
-        return jsonify({"error": "svn command not found"}), 500
+        return jsonify({"error": "svn command not found. Please install SVN or add it to PATH."}), 500
     except subprocess.TimeoutExpired:
         return jsonify({"error": "svn log timed out"}), 500
 
@@ -274,7 +274,7 @@ def api_svn_log_detail():
     username = request.args.get("username", "").strip()
     password = request.args.get("password", "").strip()
 
-    cmd = ["svn", "log", "-r", rev, "-v", "--xml", "--non-interactive"]
+    cmd = [get_svn_command(), "log", "-r", rev, "-v", "--xml", "--non-interactive"]
     if username and password:
         cmd += ["--username", username, "--password", password]
     cmd.append(dir_path)
@@ -322,7 +322,7 @@ def _get_repo_root(wc_path):
     """Get the SVN repository root URL from a working copy path."""
     try:
         result = subprocess.run(
-            ["svn", "info", "--xml", wc_path],
+            [get_svn_command(), "info", "--xml", wc_path],
             capture_output=True, text=True, timeout=10,
         )
         if result.returncode == 0:
@@ -338,7 +338,7 @@ def _get_repo_root(wc_path):
 def _svn_cat_rev(full_url, rev, username=None, password=None):
     """Get file content at a specific revision via full SVN URL. Returns temp file path or None."""
     try:
-        cmd = ["svn", "cat", "-r", str(rev), "--non-interactive"]
+        cmd = [get_svn_command(), "cat", "-r", str(rev), "--non-interactive"]
         if username and password:
             cmd += ["--username", username, "--password", password]
         cmd.append(full_url)
@@ -424,7 +424,7 @@ def api_svn_history_diff():
     else:
         # Text file
         try:
-            cmd = ["svn", "diff", "-c", rev, "--non-interactive"]
+            cmd = [get_svn_command(), "diff", "-c", rev, "--non-interactive"]
             if username and password:
                 cmd += ["--username", username, "--password", password]
             cmd.append(full_url)
@@ -1173,12 +1173,14 @@ function renderExcelDiff(data) {
     html += '</div>';
   }
   $('#contentArea').innerHTML = html;
+  requestAnimationFrame(syncVisibleDiffRowHeights);
 }
 
 function switchSheet(name) {
   activeSheet = name;
   $$('.sheet-tab').forEach(t=>t.classList.toggle('active',t.dataset.sheet===name));
   $$('.sheet-panel').forEach(p=>p.style.display=p.dataset.sheet===name?'flex':'none');
+  requestAnimationFrame(syncVisibleDiffRowHeights);
 }
 
 let _scrollSyncId = 0;
@@ -1252,22 +1254,24 @@ function renderSheetDiff(sdata, sheetName) {
   for (const chunk of displayChunks) {
     if (chunk.type === 'collapsed') {
       const collapseId = `exp_${sid}_${chunk.rowStart}`;
-      leftRows  += `<tr class="row-collapsed" data-expand="${collapseId}"><td colspan="${numCols+2}" class="collapse-cell" onclick="expandRows('${collapseId}', ${sid})">&#8943; ${chunk.count} unchanged rows (${chunk.fromBase}-${chunk.toBase}) &#8943;</td></tr>`;
-      rightRows += `<tr class="row-collapsed" data-expand="${collapseId}"><td colspan="${numCols+2}" class="collapse-cell" onclick="expandRows('${collapseId}', ${sid})">&#8943; ${chunk.count} unchanged rows (${chunk.fromWork}-${chunk.toWork}) &#8943;</td></tr>`;
+      const pairId = `${sid}_c${chunk.rowStart}`;
+      leftRows  += `<tr class="row-collapsed" data-expand="${collapseId}" data-pair="${pairId}"><td colspan="${numCols+2}" class="collapse-cell" onclick="expandRows('${collapseId}', ${sid})">&#8943; ${chunk.count} unchanged rows (${chunk.fromBase}-${chunk.toBase}) &#8943;</td></tr>`;
+      rightRows += `<tr class="row-collapsed" data-expand="${collapseId}" data-pair="${pairId}"><td colspan="${numCols+2}" class="collapse-cell" onclick="expandRows('${collapseId}', ${sid})">&#8943; ${chunk.count} unchanged rows (${chunk.fromWork}-${chunk.toWork}) &#8943;</td></tr>`;
     } else {
       const row = chunk.row;
       const t = row.type;
       const changed = new Set(row.changed_cols || []);
       const bl = chunk.baseLine, wl = chunk.workLine;
+      const pairId = `${sid}_r${chunk.idx}`;
       if (t === 'equal') {
-        leftRows  += `<tr class="row-equal" data-type="equal"><td class="ln">${bl}</td><td class="gutter"></td>${cellsHtml(row.base,numCols)}</tr>`;
-        rightRows += `<tr class="row-equal" data-type="equal"><td class="ln">${wl}</td><td class="gutter"></td>${cellsHtml(row.work,numCols)}</tr>`;
+        leftRows  += `<tr class="row-equal" data-type="equal" data-pair="${pairId}"><td class="ln">${bl}</td><td class="gutter"></td>${cellsHtml(row.base,numCols)}</tr>`;
+        rightRows += `<tr class="row-equal" data-type="equal" data-pair="${pairId}"><td class="ln">${wl}</td><td class="gutter"></td>${cellsHtml(row.work,numCols)}</tr>`;
       } else if (t === 'deleted') {
-        leftRows  += `<tr class="row-deleted" data-type="deleted"><td class="ln">${bl}</td><td class="gutter"></td>${cellsHtml(row.base,numCols)}</tr>`;
-        rightRows += `<tr class="row-deleted" data-type="deleted"><td class="ln empty-side"></td><td class="gutter"></td>${emptyCells(numCols)}</tr>`;
+        leftRows  += `<tr class="row-deleted" data-type="deleted" data-pair="${pairId}"><td class="ln">${bl}</td><td class="gutter"></td>${cellsHtml(row.base,numCols)}</tr>`;
+        rightRows += `<tr class="row-deleted" data-type="deleted" data-pair="${pairId}"><td class="ln empty-side"></td><td class="gutter"></td>${emptyCells(numCols)}</tr>`;
       } else if (t === 'added') {
-        leftRows  += `<tr class="row-added" data-type="added"><td class="ln empty-side"></td><td class="gutter"></td>${emptyCells(numCols)}</tr>`;
-        rightRows += `<tr class="row-added" data-type="added"><td class="ln">${wl}</td><td class="gutter"></td>${cellsHtml(row.work,numCols)}</tr>`;
+        leftRows  += `<tr class="row-added" data-type="added" data-pair="${pairId}"><td class="ln empty-side"></td><td class="gutter"></td>${emptyCells(numCols)}</tr>`;
+        rightRows += `<tr class="row-added" data-type="added" data-pair="${pairId}"><td class="ln">${wl}</td><td class="gutter"></td>${cellsHtml(row.work,numCols)}</tr>`;
       } else if (t === 'modified') {
         let lc='',rc='';
         for(let c=0;c<numCols;c++){
@@ -1276,8 +1280,8 @@ function renderSheetDiff(sdata, sheetName) {
           if(changed.has(c)){lc+=`<td class="cell-changed"><span class="old-val">${escVal(bv)}</span></td>`;rc+=`<td class="cell-changed"><span class="new-val">${escVal(wv)}</span></td>`;}
           else{lc+=`<td>${escVal(bv)}</td>`;rc+=`<td>${escVal(wv)}</td>`;}
         }
-        leftRows  += `<tr class="row-modified" data-type="modified"><td class="ln">${bl}</td><td class="gutter"></td>${lc}</tr>`;
-        rightRows += `<tr class="row-modified" data-type="modified"><td class="ln">${wl}</td><td class="gutter"></td>${rc}</tr>`;
+        leftRows  += `<tr class="row-modified" data-type="modified" data-pair="${pairId}"><td class="ln">${bl}</td><td class="gutter"></td>${lc}</tr>`;
+        rightRows += `<tr class="row-modified" data-type="modified" data-pair="${pairId}"><td class="ln">${wl}</td><td class="gutter"></td>${rc}</tr>`;
       }
     }
   }
@@ -1301,7 +1305,10 @@ function renderSheetDiff(sdata, sheetName) {
   html += `</div>`;
 
   // Sync horizontal scroll only (vertical is shared via .diff-scroll)
-  requestAnimationFrame(() => setupHScrollSync(`diffL${sid}`, `diffR${sid}`));
+  requestAnimationFrame(() => {
+    setupHScrollSync(`diffL${sid}`, `diffR${sid}`);
+    syncDiffRowHeights(sid);
+  });
   return html;
 }
 
@@ -1331,8 +1338,9 @@ function expandRows(collapseId, sid) {
   let i = rowStart;
   while (i < rows.length && rows[i].type === 'equal') {
     bl++; wl++;
-    newLeftHtml  += `<tr class="row-equal" data-type="equal"><td class="ln">${bl}</td><td class="gutter"></td>${cellsHtml(rows[i].base, numCols)}</tr>`;
-    newRightHtml += `<tr class="row-equal" data-type="equal"><td class="ln">${wl}</td><td class="gutter"></td>${cellsHtml(rows[i].work, numCols)}</tr>`;
+    const pairId = `${sid}_r${i}`;
+    newLeftHtml  += `<tr class="row-equal" data-type="equal" data-pair="${pairId}"><td class="ln">${bl}</td><td class="gutter"></td>${cellsHtml(rows[i].base, numCols)}</tr>`;
+    newRightHtml += `<tr class="row-equal" data-type="equal" data-pair="${pairId}"><td class="ln">${wl}</td><td class="gutter"></td>${cellsHtml(rows[i].work, numCols)}</tr>`;
     i++;
   }
 
@@ -1344,6 +1352,44 @@ function expandRows(collapseId, sid) {
 
   // Re-sync horizontal scroll
   setupHScrollSync(`diffL${sid}`, `diffR${sid}`);
+  requestAnimationFrame(() => syncDiffRowHeights(sid));
+}
+
+function syncVisibleDiffRowHeights() {
+  $$('.sheet-panel').forEach(panel => {
+    if (panel.style.display === 'none') return;
+    panel.querySelectorAll('.diff-scroll').forEach(scroll => {
+      const sid = scroll.id.replace('diffScroll', '');
+      syncDiffRowHeights(sid);
+    });
+  });
+}
+
+function syncDiffRowHeights(sid) {
+  const leftBody = document.querySelector(`#diffL${sid} tbody`);
+  const rightBody = document.querySelector(`#diffR${sid} tbody`);
+  if (!leftBody || !rightBody || !leftBody.offsetParent) return;
+
+  leftBody.querySelectorAll('tr[data-pair]').forEach(leftRow => {
+    const pair = leftRow.dataset.pair;
+    const rightRow = rightBody.querySelector(`tr[data-pair="${pair}"]`);
+    if (!rightRow) return;
+
+    leftRow.style.height = '';
+    rightRow.style.height = '';
+    leftRow.style.minHeight = '';
+    rightRow.style.minHeight = '';
+
+    if (leftRow.style.display === 'none' || rightRow.style.display === 'none') return;
+    const height = Math.max(leftRow.getBoundingClientRect().height, rightRow.getBoundingClientRect().height);
+    if (height > 0) {
+      const px = `${Math.ceil(height)}px`;
+      leftRow.style.height = px;
+      rightRow.style.height = px;
+      leftRow.style.minHeight = px;
+      rightRow.style.minHeight = px;
+    }
+  });
 }
 
 function setupHScrollSync(leftId, rightId) {
@@ -1385,6 +1431,7 @@ function toggleFilter(btn) {
       row.style.display = active[row.dataset.type] ? '' : 'none';
     });
   });
+  requestAnimationFrame(syncVisibleDiffRowHeights);
 }
 
 // ---- History ----
