@@ -1,0 +1,18 @@
+.venv/
+__pycache__/
+*.pyc
+.DS_Store
+
+# PyInstaller
+desktop/build/
+desktop/dist/
+desktop/*.spec
+desktop/.venv/
+
+# Claude Code
+.claude/
+.playwright-mcp/
+
+# IDE
+.idea/
+.vscode/
