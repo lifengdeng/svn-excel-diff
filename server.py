@@ -28,6 +28,13 @@ from svn_excel_diff import read_excel_to_rows, build_unified_diff, get_svn_base,
 app = Flask(__name__)
 
 
+def _run_subprocess(*args, **kwargs):
+    """Run subprocesses without flashing console windows in packaged Windows GUI."""
+    if os.name == "nt":
+        kwargs.setdefault("creationflags", subprocess.CREATE_NO_WINDOW)
+    return subprocess.run(*args, **kwargs)
+
+
 # ---------------------------------------------------------------------------
 # API: Directory browsing
 # ---------------------------------------------------------------------------
@@ -68,7 +75,7 @@ def api_browse():
     is_svn = is_svn_root
     if not is_svn:
         try:
-            r = subprocess.run(
+            r = _run_subprocess(
                 [get_svn_command(), "info", req_path],
                 capture_output=True, text=True, timeout=5,
             )
@@ -117,7 +124,7 @@ def api_svn_status():
         return jsonify({"error": "Invalid path"}), 400
 
     try:
-        result = subprocess.run(
+        result = _run_subprocess(
             [get_svn_command(), "status", dir_path],
             capture_output=True, text=True, timeout=30,
         )
@@ -198,7 +205,7 @@ def api_svn_diff():
             os.unlink(base_tmp)
     else:
         # Text file — use svn diff
-        result = subprocess.run(
+        result = _run_subprocess(
             [get_svn_command(), "diff", filepath],
             capture_output=True, text=True,
         )
@@ -231,7 +238,7 @@ def api_svn_log():
     cmd.append(f"{dir_path}@HEAD")
 
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        result = _run_subprocess(cmd, capture_output=True, text=True, timeout=30)
     except FileNotFoundError:
         return jsonify({"error": "svn command not found. Please install SVN or add it to PATH."}), 500
     except subprocess.TimeoutExpired:
@@ -282,7 +289,7 @@ def api_svn_log_detail():
     cmd.append(f"{dir_path}@HEAD")
 
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        result = _run_subprocess(cmd, capture_output=True, text=True, timeout=30)
     except Exception:
         return jsonify({"error": "svn log failed"}), 500
 
@@ -323,7 +330,7 @@ def api_svn_log_detail():
 def _get_repo_root(wc_path):
     """Get the SVN repository root URL from a working copy path."""
     try:
-        result = subprocess.run(
+        result = _run_subprocess(
             [get_svn_command(), "info", "--xml", wc_path],
             capture_output=True, text=True, timeout=10,
         )
@@ -345,7 +352,7 @@ def _svn_cat_rev(full_url, rev, username=None, password=None):
             cmd += ["--username", username, "--password", password]
         cmd.append(full_url)
         print(f"[DEBUG] svn cat cmd: svn cat -r {rev} {full_url}", flush=True)
-        result = subprocess.run(cmd, capture_output=True, check=True, timeout=30)
+        result = _run_subprocess(cmd, capture_output=True, check=True, timeout=30)
         ext = os.path.splitext(full_url)[1]
         with tempfile.NamedTemporaryFile(suffix=ext, delete=False) as f:
             f.write(result.stdout)
@@ -430,7 +437,7 @@ def api_svn_history_diff():
             if username and password:
                 cmd += ["--username", username, "--password", password]
             cmd.append(full_url)
-            result = subprocess.run(
+            result = _run_subprocess(
                 cmd, capture_output=True, text=True, timeout=30,
             )
             return jsonify({
@@ -906,6 +913,7 @@ let activeSheet = null;
 
 // ---- Utils ----
 function esc(s) { const d=document.createElement('div'); d.textContent=String(s); return d.innerHTML; }
+function attr(s) { return esc(s).replace(/"/g, '&quot;').replace(/'/g, '&#39;'); }
 function $(sel) { return document.querySelector(sel); }
 function $$(sel) { return document.querySelectorAll(sel); }
 
@@ -971,7 +979,7 @@ function renderBreadcrumb(fullPath, sep) {
   // Root
   const isWindows = sep === '\\';
   if (!isWindows) {
-    html += `<span class="breadcrumb-item" onclick="browseTo('/')">/</span>`;
+    html += `<span class="breadcrumb-item" data-browse-path="${attr('/')}">/</span>`;
   }
 
   for (let i = 0; i < parts.length; i++) {
@@ -980,9 +988,12 @@ function renderBreadcrumb(fullPath, sep) {
       : sep + parts.slice(0, i+1).join(sep);
     const isLast = i === parts.length - 1;
     if (i > 0 || !isWindows) html += `<span class="breadcrumb-sep">&rsaquo;</span>`;
-    html += `<span class="breadcrumb-item ${isLast ? 'current' : ''}" ${isLast ? '' : `onclick="browseTo('${esc(partial)}')"`}>${esc(parts[i])}</span>`;
+    html += `<span class="breadcrumb-item ${isLast ? 'current' : ''}" ${isLast ? '' : `data-browse-path="${attr(partial)}"`}>${esc(parts[i])}</span>`;
   }
   bar.innerHTML = html;
+  bar.querySelectorAll('[data-browse-path]').forEach(el => {
+    el.addEventListener('click', () => browseTo(el.dataset.browsePath));
+  });
 }
 
 async function renderQuickAccess() {
@@ -993,7 +1004,7 @@ async function renderQuickAccess() {
   try {
     const data = await api('/api/drives');
     for (const d of data.drives) {
-      html += `<button class="quick-btn" onclick="browseTo('${esc(d.path)}')"><span class="qicon">&#128187;</span> ${esc(d.name)}</button>`;
+      html += `<button class="quick-btn" data-browse-path="${attr(d.path)}"><span class="qicon">&#128187;</span> ${esc(d.name)}</button>`;
     }
   } catch {}
 
@@ -1003,10 +1014,13 @@ async function renderQuickAccess() {
     html += `<span class="quick-section-label">Recent</span>`;
     for (const p of recent) {
       const name = p.split('/').pop() || p.split('\\').pop() || p;
-      html += `<button class="quick-btn" onclick="browseTo('${esc(p)}')" title="${esc(p)}"><span class="qicon">&#128338;</span> ${esc(name)}</button>`;
+      html += `<button class="quick-btn" data-browse-path="${attr(p)}" title="${attr(p)}"><span class="qicon">&#128338;</span> ${esc(name)}</button>`;
     }
   }
   container.innerHTML = html;
+  container.querySelectorAll('[data-browse-path]').forEach(el => {
+    el.addEventListener('click', () => browseTo(el.dataset.browsePath));
+  });
 }
 
 function renderDirList(data) {
@@ -1021,12 +1035,15 @@ function renderDirList(data) {
   // Check which subdirs are SVN working copies (async, progressively update)
   let html = '';
   for (const entry of dirs) {
-    html += `<div class="dir-item" data-path="${esc(entry.path)}" onclick="browseTo('${esc(entry.path)}')">
+    html += `<div class="dir-item" data-path="${attr(entry.path)}" data-browse-path="${attr(entry.path)}">
       <span class="dir-icon">&#128193;</span>
       <span class="dir-name">${esc(entry.name)}</span>
     </div>`;
   }
   body.innerHTML = html;
+  body.querySelectorAll('[data-browse-path]').forEach(el => {
+    el.addEventListener('click', () => browseTo(el.dataset.browsePath));
+  });
 
   // If current directory is SVN, get status and group changes by subdirectory
   if (data.is_svn) {

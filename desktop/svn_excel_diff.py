@@ -39,6 +39,13 @@ SVN_CANDIDATES = (
 )
 
 
+def _run_subprocess(*args, **kwargs):
+    """Run subprocesses without flashing console windows in packaged Windows GUI."""
+    if os.name == "nt":
+        kwargs.setdefault("creationflags", subprocess.CREATE_NO_WINDOW)
+    return subprocess.run(*args, **kwargs)
+
+
 def get_svn_command():
     """Return an svn executable path that works from shells and macOS .app launches."""
     svn = shutil.which("svn")
@@ -141,7 +148,7 @@ def read_excel_to_rows(filepath):
 
 def get_svn_base(filepath):
     try:
-        result = subprocess.run(
+        result = _run_subprocess(
             [get_svn_command(), "cat", filepath], capture_output=True, check=True,
         )
         ext = os.path.splitext(filepath)[1]
@@ -153,7 +160,7 @@ def get_svn_base(filepath):
 
 
 def get_svn_status(directory):
-    result = subprocess.run(
+    result = _run_subprocess(
         [get_svn_command(), "status", directory], capture_output=True, text=True,
     )
     files = []
@@ -168,7 +175,7 @@ def get_svn_status(directory):
 
 def get_svn_info(filepath):
     """Get SVN revision info for display."""
-    result = subprocess.run(
+    result = _run_subprocess(
         [get_svn_command(), "info", filepath], capture_output=True, text=True,
     )
     info = {}
@@ -1094,7 +1101,7 @@ def main():
             finally:
                 os.unlink(base_tmp)
         else:
-            r = subprocess.run([get_svn_command(), "diff", filepath], capture_output=True, text=True)
+            r = _run_subprocess([get_svn_command(), "diff", filepath], capture_output=True, text=True)
             if r.stdout.strip():
                 results.append((filepath, status, None, r.stdout))
 

@@ -8,10 +8,27 @@ echo   Building SVN Diff Viewer.exe
 echo ================================
 echo.
 
+set "PYTHON_CMD="
+py -3 --version >nul 2>&1
+if %errorlevel% equ 0 set "PYTHON_CMD=py -3"
+if not defined PYTHON_CMD (
+    python3 --version >nul 2>&1
+    if %errorlevel% equ 0 set "PYTHON_CMD=python3"
+)
+if not defined PYTHON_CMD (
+    python --version >nul 2>&1
+    if %errorlevel% equ 0 set "PYTHON_CMD=python"
+)
+if not defined PYTHON_CMD (
+    echo [ERROR] Python 3.8+ not found.
+    pause
+    exit /b 1
+)
+
 :: Check / create venv
 if not exist ".venv" (
     echo [SETUP] Creating virtual environment...
-    python -m venv .venv
+    %PYTHON_CMD% -m venv .venv
 )
 
 call .venv\Scripts\activate.bat
