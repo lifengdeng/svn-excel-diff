@@ -226,7 +226,9 @@ def api_svn_log():
     cmd = [get_svn_command(), "log", "-l", str(limit), "--xml", "--non-interactive"]
     if username and password:
         cmd += ["--username", username, "--password", password]
-    cmd.append(dir_path)
+    # Peg at HEAD so we see commits made on the server after the WC's BASE
+    # revision (otherwise an out-of-date WC shows stale history).
+    cmd.append(f"{dir_path}@HEAD")
 
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
@@ -277,7 +279,7 @@ def api_svn_log_detail():
     cmd = [get_svn_command(), "log", "-r", rev, "-v", "--xml", "--non-interactive"]
     if username and password:
         cmd += ["--username", username, "--password", password]
-    cmd.append(dir_path)
+    cmd.append(f"{dir_path}@HEAD")
 
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
@@ -1463,6 +1465,14 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 });
 
+function formatSvnDate(s) {
+  if (!s) return '';
+  const d = new Date(s);
+  if (isNaN(d.getTime())) return s.substring(0,10) + ' ' + s.substring(11,16);
+  const pad = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
 async function loadLog() {
   const list = $('#logList');
   list.innerHTML = '<div class="loading"><div class="spinner"></div> Loading history...</div>';
@@ -1473,7 +1483,7 @@ async function loadLog() {
       return;
     }
     list.innerHTML = data.entries.map(e => {
-      const date = e.date ? e.date.substring(0,10) + ' ' + e.date.substring(11,16) : '';
+      const date = formatSvnDate(e.date);
       const msg = e.message ? e.message.split('\n')[0] : '(no message)';
       return `<div class="log-item" data-rev="${esc(e.revision)}" onclick="selectCommit('${esc(e.revision)}', this)">
         <div><span class="log-rev">r${esc(e.revision)}</span><span class="log-meta">${esc(e.author)} &middot; ${esc(date)}</span></div>
@@ -1500,7 +1510,7 @@ async function selectCommit(rev, el) {
 
   try {
     const data = await api(`/api/svn/log-detail?path=${encodeURIComponent(historyWcPath)}&revision=${rev}${svnAuth()}`);
-    const date = data.date ? data.date.substring(0,10) + ' ' + data.date.substring(11,16) : '';
+    const date = formatSvnDate(data.date);
     $('#historyDetailHeader').innerHTML = `<strong>r${esc(rev)}</strong> &middot; ${esc(data.author)} &middot; ${esc(date)}<br><span style="color:var(--text);">${esc(data.message || '(no message)')}</span>`;
 
     if (!data.files.length) {
